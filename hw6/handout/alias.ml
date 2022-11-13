@@ -34,7 +34,35 @@ type fact = SymPtr.t UidM.t
 
  *)
 let insn_flow ((u,i):uid * insn) (d:fact) : fact =
-  failwith "Alias.insn_flow unimplemented"
+  match i with
+    | Alloca(_) -> UidM.add u SymPtr.Unique d
+    | Load(Ptr(Ptr(_)), Id(src)) -> UidM.add u SymPtr.MayAlias d
+    | Store(Ptr(Ptr(_)), _, Id(src)) -> UidM.add src SymPtr.MayAlias d
+    | Call(ty, _, ops) -> 
+      let d' = begin match ty with 
+        | Fun(_, Ptr(_)) -> UidM.add u SymPtr.MayAlias d 
+        | _ -> d
+      end in
+      List.fold_left (fun d op -> match op with
+        | (Ptr(_), Id(src)) -> UidM.add src SymPtr.MayAlias d
+        | _ -> d
+      ) d' ops
+    | Bitcast(ty, op, op_ty) -> 
+      let d' = begin match ty with 
+        | Ptr(_) -> UidM.add u SymPtr.MayAlias d 
+        | _ -> d
+      end in
+      begin match (op_ty, op) with
+        | (Ptr(_), Id(src)) -> UidM.add src SymPtr.MayAlias d'
+        | _ -> d'
+      end
+    | Gep(_, op, _) -> 
+      let d' = UidM.add u SymPtr.MayAlias d in
+      begin match op with
+        | Id(src) -> UidM.add src SymPtr.MayAlias d'
+        | _ -> d'
+      end
+    | _ -> UidM.add u SymPtr.UndefAlias d
 
 
 (* The flow function across terminators is trivial: they never change alias info *)
@@ -69,7 +97,19 @@ module Fact =
        join of two SymPtr.t facts.
     *)
     let combine (ds:fact list) : fact =
-      failwith "Alias.Fact.combine not implemented"
+      let merge_func = fun _ a b -> begin match a with
+        | Some(SymPtr.MayAlias) -> Some(SymPtr.MayAlias)
+        | Some(SymPtr.Unique) -> begin match b with
+          | Some(SymPtr.MayAlias) -> Some(SymPtr.MayAlias)
+          | _ -> Some(SymPtr.Unique)
+        end
+        | _ -> begin match b with
+          | Some(SymPtr.MayAlias) -> Some(SymPtr.MayAlias)
+          | Some(SymPtr.Unique) -> Some(SymPtr.Unique)
+          | _ -> Some(SymPtr.UndefAlias)
+        end
+      end in
+      List.fold_left (UidM.merge (merge_func)) UidM.empty ds
   end
 
 (* instantiate the general framework ---------------------------------------- *)

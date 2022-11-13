@@ -24,7 +24,28 @@ open Datastructures
 let dce_block (lb:uid -> Liveness.Fact.t) 
               (ab:uid -> Alias.fact)
               (b:Ll.block) : Ll.block =
-  failwith "Dce.dce_block unimplemented"
+  let { insns=insns; term=term } = b in
+  let insns' = List.filter (fun (uid, ins) ->
+    match ins with
+      | Call(_) -> true
+      | Store(_, _, Id(dst)) -> begin 
+        let live = begin match UidS.find_opt dst (lb uid) with
+          | Some(_) -> true
+          | None -> false
+        end in
+        let aliased = begin match UidM.find_opt dst (ab uid) with
+          | Some(Alias.SymPtr.MayAlias) -> true
+          | _ -> false
+        end in
+        live || aliased
+      end
+      | Store(_) -> true
+      | _ -> begin match UidS.find_opt uid (lb uid) with
+        | Some(_) -> true
+        | None -> false
+      end
+    ) insns in
+  { insns=insns'; term=term }
 
 let run (lg:Liveness.Graph.t) (ag:Alias.Graph.t) (cfg:Cfg.t) : Cfg.t =
 
